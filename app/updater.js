@@ -391,7 +391,8 @@
         }
       }
       function deleteApp(cb){
-        del(to, {force: true}, cb);
+        // in case of path to root folder we want to remove everything from within but root folder as it may be locked
+        del( to + '/**/*', {force: true}, cb);
       }
       function appCopied(err){
         if(err){
