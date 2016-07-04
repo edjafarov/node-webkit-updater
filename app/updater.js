@@ -10,6 +10,63 @@
 
   var platform = process.platform;
   platform = /^win/.test(platform)? 'win' : /^darwin/.test(platform)? 'mac' : 'linux' + (process.arch == 'ia32' ? '32' : '64');
+  var arch = 32; //TODO
+
+
+  /**
+   * Intelligently chooses a package from the available ones
+   * @param {object} packages
+   * @param {number} forceArch - Optional
+   * @returns {object}
+   */
+  var getApplicablePackage = function(packages, forceArch){
+    var pkg,
+        packagesCheckedFor = [];
+
+    var getPackageForPlatform = function(platformName){
+      packagesCheckedFor.push(platformName);
+      return packages[platformName];
+    };
+
+    // For Linux, just use `platform` (it already has the arch in it and 32-bit apps can't run on 64-bit Linux anyway)
+    if(platform.indexOf('linux') === 0){
+      pkg = getPackageForPlatform(platform);
+    }
+    // If we're on Mac / Windows and an arch was forced, check only for that
+    else if(forceArch){
+      pkg = getPackageForPlatform(platform + forceArch);
+      if(pkg){
+        return pkg;
+      }
+    }
+    // If we're on Mac / Windows and the arch wasn't forced, let's take the best suited package from the manifest
+    else {
+      // Check if there's a package specifically for the current platform and arch
+      pkg = getPackageForPlatform(platform + arch);
+      if(pkg){
+        return pkg;
+      }
+
+      // Specific package for detected arch doesn't exist; try plain arch-less mac or win
+      pkg = getPackageForPlatform(platform);
+      if(pkg){
+        return pkg;
+      }
+
+      // If we're on 64-bit and there is no 64-bit or arch-less package, check for 32-bit one
+      if(arch === 64){
+        pkg = getPackageForPlatform(platform + 32);
+        if(pkg){
+          return pkg;
+        }
+      }
+    }
+
+    if(!pkg){
+      throw new Error('No applicable package found in manifest. Checked for ' + packagesCheckedFor.join(', '));
+    }
+    return pkg;
+  };
 
 
   /**
@@ -20,6 +77,8 @@
    * @constructor
    * @param {object} manifest - See the [manifest schema](#manifest-schema) below.
    * @param {object} options - Optional
+   * @param {string} options.temporaryDirectory - Optional (Only supported on Mac and Windows)
+   * @param {number} options.forceArch - Optional
    * @property {string} options.temporaryDirectory - (Optional) path to a directory to download the updates to and unpack them in. Defaults to [`os.tmpdir()`](https://nodejs.org/api/os.html#os_os_tmpdir)
    */
   function updater(manifest, options){
@@ -27,6 +86,10 @@
     this.options = {
       temporaryDirectory: options && options.temporaryDirectory || os.tmpdir()
     };
+
+    if(['mac', 'win'].indexOf(platform) !== -1){
+      this.options.forceArch = options.forceArch;
+    }
   }
 
 
@@ -71,7 +134,8 @@
    */
   updater.prototype.download = function(cb, newManifest){
     var manifest = newManifest || this.manifest;
-    var url = manifest.packages[platform].url;
+
+    var url = getApplicablePackage(manifest.packages).url;
     var pkg = request(url, function(err, response){
         if(err){
             cb(err);
@@ -166,7 +230,7 @@
      * @return {string}
      */
     getExecPathRelativeToPackage = function(manifest){
-      var execPath = manifest.packages[platform] && manifest.packages[platform].execPath;
+      var execPath = getApplicablePackage(manifest.packages).execPath;
 
       if(execPath){
         return execPath;
